@@ -1,4 +1,5 @@
 import uuid
+import logging
 from pathlib import Path
 from typing import BinaryIO
 
@@ -6,6 +7,8 @@ import boto3
 from botocore.exceptions import ClientError
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class StorageService:
@@ -35,13 +38,18 @@ class StorageService:
 
         unique_filename = f"invoices/{uuid.uuid4()}{extension}"
 
-        self.s3.upload_fileobj(
-            Fileobj=file,
-            Bucket=self.bucket_name,
-            Key=unique_filename,
-        )
-
-        return unique_filename
+        logger.info(f"Uploading file '{filename}' as S3 key '{unique_filename}'")
+        try:
+            self.s3.upload_fileobj(
+                Fileobj=file,
+                Bucket=self.bucket_name,
+                Key=unique_filename,
+            )
+            logger.info(f"Successfully uploaded S3 key '{unique_filename}'")
+            return unique_filename
+        except Exception as e:
+            logger.error(f"S3 upload failed for '{filename}': {str(e)}")
+            raise e
 
     # =====================================================
     # Download File
@@ -68,10 +76,16 @@ class StorageService:
         Deletes a file from S3.
         """
 
-        self.s3.delete_object(
-            Bucket=self.bucket_name,
-            Key=s3_key,
-        )
+        logger.info(f"Deleting S3 key '{s3_key}'")
+        try:
+            self.s3.delete_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+            )
+            logger.info(f"Successfully deleted S3 key '{s3_key}'")
+        except Exception as e:
+            logger.error(f"S3 delete failed for key '{s3_key}': {str(e)}")
+            raise e
 
     # =====================================================
     # Generate Presigned URL

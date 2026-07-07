@@ -9,6 +9,7 @@ import Table, { Pagination } from '../components/ui/Table'
 import { MOCK_UPLOAD_HISTORY } from '../utils/mockData'
 import { formatDateTime } from '../utils/helpers'
 import toast from 'react-hot-toast'
+import { invoiceService } from '../services/api'
 
 const HISTORY_COLUMNS = [
   { key: 'filename', label: 'File Name', sortable: true },
@@ -42,18 +43,52 @@ const HISTORY_COLUMNS = [
 export default function UploadPage() {
   const [uploadedFiles, setUploadedFiles] = useState([])
   const [submitted, setSubmitted] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   const handleFiles = (files) => {
     setUploadedFiles(files)
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!uploadedFiles.length) {
       toast.error('Please select at least one file to upload.')
       return
     }
-    setSubmitted(true)
-    toast.success(`${uploadedFiles.length} file(s) uploaded successfully! Processing initiated.`)
+
+    setUploading(true)
+    let successCount = 0
+
+    for (const fileObj of uploadedFiles) {
+      const formData = new FormData()
+
+      // Generate a temporary unique invoice number to avoid backend duplication checks
+      const randomId = Math.random().toString(36).slice(2, 8).toUpperCase()
+      const tempInvoiceNo = `INV-TEMP-${randomId}`
+      const todayStr = new Date().toISOString().split('T')[0]
+
+      formData.append('file', fileObj)
+      formData.append('vendor_name', 'Pending AI Extraction')
+      formData.append('invoice_number', tempInvoiceNo)
+      formData.append('invoice_date', todayStr)
+      formData.append('currency', 'USD')
+      formData.append('total', '0')
+
+      try {
+        await invoiceService.upload(formData)
+        successCount++
+      } catch (err) {
+        console.error('File upload failed:', fileObj.name, err)
+        const errorDetail = err.detail || err.message || 'Connection or server error'
+        toast.error(`Failed to upload ${fileObj.name}: ${errorDetail}`)
+      }
+    }
+
+    setUploading(false)
+
+    if (successCount > 0) {
+      setSubmitted(true)
+      toast.success(`${successCount} file(s) uploaded successfully! Processing initiated.`)
+    }
   }
 
   return (
@@ -96,14 +131,14 @@ export default function UploadPage() {
             </div>
 
             <div className="flex items-center justify-between mt-5 pt-4 border-t border-gray-100">
-              <p className="text-xs text-gray-400">Max 25 MB per file · Up to 5 files at once</p>
+              <p className="text-xs text-gray-400">Max 20 MB per file · Up to 5 files at once</p>
               <button
                 onClick={handleSubmit}
                 className="btn-primary"
-                disabled={submitted}
+                disabled={submitted || uploading}
               >
                 <Upload className="w-4 h-4" />
-                {submitted ? 'Submitted' : 'Submit for Processing'}
+                {uploading ? 'Uploading...' : submitted ? 'Submitted' : 'Submit for Processing'}
               </button>
             </div>
           </Card>

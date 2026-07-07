@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -7,6 +8,8 @@ from app.database import get_db
 from app.schemas import InvoiceResponse, MessageResponse
 from app.services.invoice_service import invoice_service
 from app.services.storage_service import storage_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/invoices",
@@ -28,35 +31,40 @@ async def upload_invoice(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-
-    # Duplicate invoice check
-    if invoice_service.invoice_exists(db, invoice_number):
-        raise HTTPException(
-            status_code=400,
-            detail="Invoice already exists.",
-        )
-
-    # Upload file to S3
-    s3_key = storage_service.upload_file(
-        file=file.file,
-        filename=file.filename,
-    )
-
-    # Save invoice metadata
-    invoice = invoice_service.create_invoice(
+    logger.info(f"Handling invoice upload for vendor '{vendor_name}', invoice number '{invoice_number}'")
+    return invoice_service.upload_and_create_invoice(
         db=db,
         vendor_name=vendor_name,
         invoice_number=invoice_number,
-        invoice_date=datetime.strptime(invoice_date, "%Y-%m-%d").date(),
+        invoice_date_str=invoice_date,
         currency=currency,
         total=total,
-        filename=file.filename,
-        file_size=file.size,
-        s3_key=s3_key,
-        status="UPLOADED",
+        file=file,
     )
 
-    return invoice
+
+# =====================================================
+# Upload History
+# =====================================================
+
+@router.get("/upload-history", response_model=list[InvoiceResponse])
+def get_upload_history(
+    db: Session = Depends(get_db),
+    skip: int = 0,
+    limit: int = 100,
+):
+    """
+    Returns the recent invoice upload history.
+    """
+    logger.info("Fetching recent invoice upload history...")
+    try:
+        return invoice_service.get_all_invoices(db, skip=skip, limit=limit)
+    except Exception as e:
+        logger.error(f"Failed to retrieve upload history: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve upload history."
+        )
 
 
 # =====================================================
@@ -104,22 +112,20 @@ def delete_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
 ):
-
+    logger.info(f"Handling deletion for invoice ID {invoice_id}")
     invoice = invoice_service.get_invoice(
         db,
         invoice_id,
     )
 
     if invoice is None:
+        logger.warning(f"Deletion failed: invoice ID {invoice_id} not found.")
         raise HTTPException(
             status_code=404,
             detail="Invoice not found.",
         )
 
-    if invoice.s3_key:
-        storage_service.delete_file(invoice.s3_key)
-
-    invoice_service.delete_invoice(
+    invoice_service.delete_invoice_and_file(
         db,
         invoice,
     )
