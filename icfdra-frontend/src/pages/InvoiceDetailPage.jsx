@@ -51,6 +51,32 @@ function TimelineItem({ event, timestamp, actor, details, isLast }) {
   )
 }
 
+const checkNames = {
+  required_fields: 'Required Fields Presence',
+  duplicate_check: 'Database Uniqueness Lookup',
+  line_items_math: 'Line Item Calculations (Qty × Price)',
+  subtotal_reconciliation: 'Subtotal Reconciliation Sum',
+  grand_total_math: 'Financial Firewall Equation (Subtotal - Discount + Tax + Shipping)',
+  decimal_precision: 'Currency Decimal Precision',
+  currency_format: 'Currency ISO Format',
+  line_item_fields: 'Line Item Completeness',
+  reasonable_dates: 'Date Consistency & Logical Order',
+  non_negative_values: 'Sign Check (Non-Negative/Positive)'
+}
+
+const complianceCheckNames = {
+  required_fields: 'Mandatory Compliance Fields',
+  invoice_number_format: 'Invoice Number Formatting',
+  currency_iso: 'ISO-4217 Currency Standard',
+  tax_id_format: 'Tax ID / VAT / GST Formatting',
+  country_compliance: 'Country-Specific Regulations',
+  date_consistency: 'Invoicing & Due Date Alignment',
+  payment_terms: 'Allowed Payment Terms',
+  duplicate_compliance: 'Vendor Invoice Duplication Check',
+  po_requirement: 'Corporate Purchase Order Threshold',
+  consistency_check: 'Positive Sign & Country-Currency Fit'
+}
+
 export default function InvoiceDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -88,6 +114,7 @@ export default function InvoiceDetailPage() {
   const fetchInvoice = async () => {
     try {
       const data = await invoiceService.getById(id)
+      console.log('INVOICE DETAIL DATA FETCHED:', data)
       const mapped = {
         id: data.id,
         isBackend: true,
@@ -103,6 +130,12 @@ export default function InvoiceDetailPage() {
         confidence: data.confidence_score ? Math.round(data.confidence_score) : 90,
         category: data.category || 'General Invoicing',
         validationIssues: data.validation_issues || [],
+        validationScore: data.validation_score !== null && data.validation_score !== undefined ? Math.round(data.validation_score) : null,
+        validationStatus: data.validation_status || null,
+        validationReport: data.validation_report || null,
+        complianceScore: data.compliance_score !== null && data.compliance_score !== undefined ? Math.round(data.compliance_score) : null,
+        complianceStatus: data.compliance_status || null,
+        complianceReport: data.compliance_report || null,
         vendor: data.vendor_name,
         vendorCountry: data.vendor_country || 'US',
         taxId: data.tax_id || '—',
@@ -241,22 +274,23 @@ export default function InvoiceDetailPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {[
           { icon: DollarSign, label: 'Invoice Amount', value: formatCurrency(invoice.amount, invoice.currency), sub: `${invoice.currency}` },
           { icon: TrendingUp, label: 'USD Equivalent', value: formatCurrency(invoice.amountUSD), sub: `FX Rate: ${invoice.fxRate}` },
           { icon: Calendar, label: 'Due Date', value: formatDate(invoice.dueDate), sub: invoice.paymentTerms },
           { icon: Activity, label: 'AI Confidence', value: `${invoice.confidence}%`, sub: `${invoice.category}` },
-        ].map(({ icon: Icon, label, value, sub }) => (
+          { icon: Shield, label: 'Compliance Audit', value: invoice.complianceScore !== null ? `${invoice.complianceScore}/100` : '—', sub: invoice.complianceStatus || 'No Audits', isCompliance: true },
+        ].map(({ icon: Icon, label, value, sub, isCompliance }) => (
           <div key={label} className="card p-4">
             <div className="flex items-start gap-3">
-              <div className="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Icon className="w-4 h-4 text-blue-600" />
+              <div className={`w-9 h-9 ${isCompliance ? 'bg-indigo-50 text-indigo-600' : 'bg-blue-50 text-blue-600'} rounded-lg flex items-center justify-center flex-shrink-0`}>
+                <Icon className="w-4 h-4" />
               </div>
               <div>
                 <p className="text-xs text-gray-500">{label}</p>
                 <p className="text-base font-bold text-gray-900 mt-0.5">{value}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{sub}</p>
+                <p className={`text-xs mt-0.5 ${isCompliance ? (sub === 'PASS' ? 'text-indigo-600 font-bold' : sub === 'FAIL' ? 'text-red-600 font-bold' : 'text-gray-400') : 'text-gray-400'}`}>{sub}</p>
               </div>
             </div>
           </div>
@@ -267,7 +301,168 @@ export default function InvoiceDetailPage() {
         {/* Left column */}
         <div className="lg:col-span-2 space-y-5">
           {/* Validation Issues */}
-          {invoice.validationIssues?.length > 0 && (
+          {/* Validation Firewall Report */}
+          {invoice.validationScore !== null && invoice.validationReport && (
+            <Card title="Deterministic Validation Firewall" icon={<Shield className="w-4 h-4 text-emerald-600" />}>
+              <div className="flex flex-col md:flex-row gap-6 items-center border-b border-gray-100 pb-5 mb-5">
+                {/* Score Gauge */}
+                <div className="relative w-24 h-24 flex-shrink-0">
+                  <svg viewBox="0 0 36 36" className="w-24 h-24 -rotate-90">
+                    <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f3f4f6" strokeWidth="2.5" />
+                    <circle
+                      cx="18" cy="18" r="15.9" fill="none"
+                      stroke={invoice.validationStatus === 'PASS' ? '#10b981' : '#ef4444'}
+                      strokeWidth="2.5"
+                      strokeDasharray={`${invoice.validationScore} 100`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xl font-bold text-gray-900">{invoice.validationScore}</span>
+                    <span className="text-[10px] text-gray-400 font-semibold uppercase">Score</span>
+                  </div>
+                </div>
+                {/* Status and Summary */}
+                <div className="text-center md:text-left space-y-1">
+                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
+                    <h3 className="text-base font-bold text-gray-900">Math Firewall Status:</h3>
+                    <Badge color={invoice.validationStatus === 'PASS' ? 'green' : 'red'}>
+                      {invoice.validationStatus}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-gray-500 max-w-md">
+                    {invoice.validationStatus === 'PASS' 
+                      ? 'This document successfully passed all deterministic financial validations and compliance formatting checks.' 
+                      : 'This document failed one or more critical financial checks. Please verify details below and make corrections.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Checks Checklist */}
+              <div className="space-y-3.5">
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Automated Audit Procedures</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(invoice.validationReport.checks || {}).map(([key, check]) => (
+                    <div key={key} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="mt-0.5">
+                        {check.pass ? (
+                          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold font-mono">✓</span>
+                        ) : (
+                          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-red-100 text-red-600 text-xs font-bold font-mono">✗</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-gray-800">
+                          {checkNames[key] || key}
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                          {check.message}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Financial Equation Details */}
+              {invoice.validationReport.details?.totals && (
+                <div className="mt-5 p-3.5 bg-blue-50 border border-blue-100 rounded-xl">
+                  <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5" /> Deterministic Equation Reconciliation
+                  </h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+                    {[
+                      { label: 'Subtotal', val: invoice.validationReport.details.totals.subtotal, sign: '' },
+                      { label: 'Discount', val: invoice.validationReport.details.totals.discount, sign: '-' },
+                      { label: 'Tax', val: invoice.validationReport.details.totals.tax, sign: '+' },
+                      { label: 'Shipping', val: invoice.validationReport.details.totals.shipping, sign: '+' },
+                      { label: 'Grand Total', val: invoice.validationReport.details.totals.total, sign: '=', isBold: true }
+                    ].map(({ label, val, sign, isBold }) => (
+                      <div key={label} className="p-2 bg-white rounded-lg border border-blue-100 relative">
+                        {sign && (
+                          <span className="absolute -left-2 top-1/2 -translate-y-1/2 text-sm font-bold text-blue-400 font-mono">
+                            {sign}
+                          </span>
+                        )}
+                        <p className="text-[9px] font-bold text-gray-400 uppercase">{label}</p>
+                        <p className={`text-xs mt-1 ${isBold ? 'font-bold text-blue-700' : 'font-semibold text-gray-700'} font-mono`}>
+                          {formatCurrency(val, invoice.currency)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* Regulatory Compliance Firewall */}
+          {invoice.complianceScore !== null && invoice.complianceReport && (
+            <Card title="Regulatory Compliance Firewall" icon={<Shield className="w-4 h-4 text-indigo-600" />}>
+              <div className="flex flex-col md:flex-row gap-6 items-center border-b border-gray-100 pb-5 mb-5">
+                {/* Score Gauge */}
+                <div className="relative w-24 h-24 flex-shrink-0">
+                  <svg viewBox="0 0 36 36" className="w-24 h-24 -rotate-90">
+                    <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f3f4f6" strokeWidth="2.5" />
+                    <circle
+                      cx="18" cy="18" r="15.9" fill="none"
+                      stroke={invoice.complianceStatus === 'PASS' ? '#4f46e5' : '#ef4444'}
+                      strokeWidth="2.5"
+                      strokeDasharray={`${invoice.complianceScore} 100`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xl font-bold text-gray-900">{invoice.complianceScore}</span>
+                    <span className="text-[10px] text-gray-400 font-semibold uppercase">Score</span>
+                  </div>
+                </div>
+                {/* Status and Summary */}
+                <div className="text-center md:text-left space-y-1">
+                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
+                    <h3 className="text-base font-bold text-gray-900">Regulatory Audit Status:</h3>
+                    <Badge color={invoice.complianceStatus === 'PASS' ? 'indigo' : 'red'}>
+                      {invoice.complianceStatus}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-gray-500 max-w-md">
+                    {invoice.complianceStatus === 'PASS' 
+                      ? 'This document is fully compliant with regulatory policies, corporate purchase rules, and taxation standards.' 
+                      : 'Regulatory compliance violations were identified. Review the checklist below to adjust fields.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Checks Checklist */}
+              <div className="space-y-3.5">
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Compliance Auditing Procedures</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(invoice.complianceReport.checks || {}).map(([key, check]) => (
+                    <div key={key} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="mt-0.5">
+                        {check.pass ? (
+                          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold font-mono">✓</span>
+                        ) : (
+                          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-red-100 text-red-600 text-xs font-bold font-mono">✗</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-gray-800">
+                          {complianceCheckNames[key] || key}
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                          {check.message}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Fallback to simple Validation Issues if validation report not present */}
+          {(!invoice.validationReport || invoice.validationScore === null) && invoice.validationIssues?.length > 0 && (
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600" />

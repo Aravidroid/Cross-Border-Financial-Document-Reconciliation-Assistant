@@ -41,7 +41,9 @@ Fields:
     "currency":"",
     "payment_terms":"",
     "subtotal":0,
+    "discount":0,
     "tax":0,
+    "shipping":0,
     "total":0,
 
     "items":[

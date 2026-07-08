@@ -21,11 +21,17 @@ export const formatNumber = (n) =>
 export const formatCompact = (n) =>
   new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 
-export const formatDate = (dateStr, fmt = 'MMM D, YYYY') =>
-  dayjs(dateStr).format(fmt)
+export const formatDate = (dateStr, fmt = 'MMM D, YYYY') => {
+  if (!dateStr || dateStr === '—') return '—'
+  const d = dayjs(dateStr)
+  return d.isValid() ? d.format(fmt) : '—'
+}
 
-export const formatDateTime = (dateStr) =>
-  dayjs(dateStr).format('MMM D, YYYY HH:mm')
+export const formatDateTime = (dateStr) => {
+  if (!dateStr || dateStr === '—') return '—'
+  const d = dayjs(dateStr)
+  return d.isValid() ? d.format('MMM D, YYYY HH:mm') : '—'
+}
 
 export const timeAgo = (dateStr) =>
   dayjs(dateStr).fromNow()

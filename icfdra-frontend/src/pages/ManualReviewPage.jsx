@@ -1,7 +1,33 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { invoiceService } from '../services/api'
 import { useForm } from 'react-hook-form'
-import { CheckCircle, XCircle, Eye, FileText, Bot, Edit3, AlertTriangle } from 'lucide-react'
+import { CheckCircle, XCircle, Eye, FileText, Bot, Edit3, AlertTriangle, Shield } from 'lucide-react'
+
+const checkNames = {
+  required_fields: 'Required Fields',
+  duplicate_check: 'DB Uniqueness',
+  line_items_math: 'Line Item Math',
+  subtotal_reconciliation: 'Subtotal Reconciliation',
+  grand_total_math: 'Financial Firewall Math',
+  decimal_precision: 'Decimal Precision',
+  currency_format: 'Currency Format',
+  line_item_fields: 'Line Item Completeness',
+  reasonable_dates: 'Date Consistency',
+  non_negative_values: 'Sign Check'
+}
+
+const complianceCheckNames = {
+  required_fields: 'Mandatory Fields',
+  invoice_number_format: 'Invoice Formatting',
+  currency_iso: 'ISO Currency',
+  tax_id_format: 'Tax ID Formatting',
+  country_compliance: 'Country Rules',
+  date_consistency: 'Date Consistency',
+  payment_terms: 'Payment Terms',
+  duplicate_compliance: 'Duplicate Lookup',
+  po_requirement: 'PO Threshold',
+  consistency_check: 'Value Consistency'
+}
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import Breadcrumb from '../components/ui/Breadcrumb'
@@ -50,6 +76,12 @@ export default function ManualReviewPage() {
         confidence: inv.confidence_score ? Math.round(inv.confidence_score) : 90,
         riskLevel: inv.risk_level || 'low',
         issues: inv.validation_issues || [],
+        validationScore: inv.validation_score !== null && inv.validation_score !== undefined ? Math.round(inv.validation_score) : null,
+        validationStatus: inv.validation_status || null,
+        validationReport: inv.validation_report || null,
+        complianceScore: inv.compliance_score !== null && inv.compliance_score !== undefined ? Math.round(inv.compliance_score) : null,
+        complianceStatus: inv.compliance_status || null,
+        complianceReport: inv.compliance_report || null,
         dueIn: '3 days',
         assignedTo: 'AI System',
         ocrData: {
@@ -284,15 +316,87 @@ export default function ManualReviewPage() {
                   ))}
                 </div>
 
-                {selected.issues?.length > 0 && (
-                  <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-600" />
-                      <p className="text-xs font-semibold text-amber-800">Flagged Issues</p>
+                {/* Validation Firewall Side Summary */}
+                {selected.validationScore !== null && selected.validationReport ? (
+                  <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Shield className="w-4 h-4 text-emerald-600" />
+                        <span className="text-xs font-bold text-gray-800">Validation Firewall</span>
+                      </div>
+                      <Badge color={selected.validationStatus === 'PASS' ? 'green' : 'red'}>
+                        {selected.validationScore}/100 {selected.validationStatus}
+                      </Badge>
                     </div>
-                    {selected.issues.map((issue, i) => (
-                      <p key={i} className="text-xs text-amber-700">• {issue}</p>
-                    ))}
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      {Object.entries(selected.validationReport.checks || {}).map(([key, check]) => (
+                        <div key={key} className="flex items-start gap-2 text-[10px]">
+                          {check.pass ? (
+                            <span className="text-emerald-600 font-bold font-mono">✓</span>
+                          ) : (
+                            <span className="text-red-600 font-bold font-mono">✗</span>
+                          )}
+                          <div className="min-w-0">
+                            <p className={`font-semibold ${check.pass ? 'text-gray-700' : 'text-red-800'}`}>
+                              {checkNames[key] || key}
+                            </p>
+                            {!check.pass && (
+                              <p className="text-[9px] text-red-600 leading-normal mt-0.5 font-sans">
+                                {check.message}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  selected.issues?.length > 0 && (
+                    <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div className="flex items-center gap-2 mb-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        <p className="text-xs font-semibold text-amber-800">Flagged Issues</p>
+                      </div>
+                      {selected.issues.map((issue, i) => (
+                        <p key={i} className="text-xs text-amber-700">• {issue}</p>
+                      ))}
+                    </div>
+                  )
+                )}
+
+                {/* Regulatory Compliance Firewall Side Summary */}
+                {selected.complianceScore !== null && selected.complianceReport && (
+                  <div className="mt-4 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between border-b border-indigo-50 pb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Shield className="w-4 h-4 text-indigo-600" />
+                        <span className="text-xs font-bold text-gray-800">Compliance Firewall</span>
+                      </div>
+                      <Badge color={selected.complianceStatus === 'PASS' ? 'indigo' : 'red'}>
+                        {selected.complianceScore}/100 {selected.complianceStatus}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      {Object.entries(selected.complianceReport.checks || {}).map(([key, check]) => (
+                        <div key={key} className="flex items-start gap-2 text-[10px]">
+                          {check.pass ? (
+                            <span className="text-indigo-600 font-bold font-mono">✓</span>
+                          ) : (
+                            <span className="text-red-600 font-bold font-mono">✗</span>
+                          )}
+                          <div className="min-w-0">
+                            <p className={`font-semibold ${check.pass ? 'text-gray-700' : 'text-red-800'}`}>
+                              {complianceCheckNames[key] || key}
+                            </p>
+                            {!check.pass && (
+                              <p className="text-[9px] text-red-600 leading-normal mt-0.5 font-sans">
+                                {check.message}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </Card>

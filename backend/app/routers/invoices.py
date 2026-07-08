@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas import InvoiceResponse, MessageResponse, AuditLogResponse
 from app.services.invoice_service import invoice_service
+from app.services.processing_service import processing_service
 from app.services.storage_service import storage_service
 from app.models import AuditLog
 
@@ -40,11 +41,13 @@ class InvoiceDetailResponse(InvoiceResponse):
     extracted_json: Optional[dict] = None
     ai_risk_summary: Optional[str] = None
     validation_issues: Optional[list[str]] = None
+    validation_report: Optional[dict] = None
+    compliance_report: Optional[dict] = None
     audit_logs: list[AuditLogResponse] = []
 
 def run_pipeline_background(invoice_id: int):
     try:
-        invoice_service.process_invoice_pipeline(invoice_id)
+        processing_service.process_invoice_pipeline(invoice_id)
     except Exception as e:
         logger.error(f"Pipeline background thread failed for invoice {invoice_id}: {str(e)}")
 

@@ -59,6 +59,10 @@ class InvoiceResponse(BaseModel):
     converted_total: Optional[Decimal] = None
 
     confidence_score: Optional[float] = None
+    validation_score: Optional[float] = None
+    validation_status: Optional[str] = None
+    compliance_score: Optional[float] = None
+    compliance_status: Optional[str] = None
 
     status: str
 

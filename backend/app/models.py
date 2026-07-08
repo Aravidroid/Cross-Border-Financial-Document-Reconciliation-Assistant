@@ -68,6 +68,12 @@ class Invoice(Base):
     extracted_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     ai_risk_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     validation_issues: Mapped[Optional[List[Any]]] = mapped_column(JSONB, nullable=True)
+    validation_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    validation_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    validation_report: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    compliance_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    compliance_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    compliance_report: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     # Storage
     filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
