@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { invoiceService } from '../services/api'
 import { useForm } from 'react-hook-form'
 import { CheckCircle, XCircle, Eye, FileText, Bot, Edit3, AlertTriangle } from 'lucide-react'
 import Card from '../components/ui/Card'
@@ -28,9 +29,72 @@ function ConfidenceMeter({ score }) {
 }
 
 export default function ManualReviewPage() {
-  const [selected, setSelected] = useState(MOCK_REVIEW_QUEUE[0])
+  const [queue, setQueue] = useState([])
+  const [selected, setSelected] = useState(null)
+  const [loading, setLoading] = useState(true)
   const [rejectModal, setRejectModal] = useState(false)
   const [approveModal, setApproveModal] = useState(false)
+  const [approvalNotes, setApprovalNotes] = useState('')
+  const [rejectReason, setRejectReason] = useState('')
+
+  const loadQueue = useCallback(async () => {
+    try {
+      const res = await invoiceService.list()
+      const pending = res.filter(inv => inv.status === 'PENDING_REVIEW')
+      const mapped = pending.map(inv => ({
+        id: inv.id,
+        isBackend: true,
+        vendor: inv.vendor_name,
+        amount: Number(inv.total),
+        currency: inv.currency,
+        confidence: inv.confidence_score ? Math.round(inv.confidence_score) : 90,
+        riskLevel: inv.risk_level || 'low',
+        issues: inv.validation_issues || [],
+        dueIn: '3 days',
+        assignedTo: 'AI System',
+        ocrData: {
+          invoiceNumber: inv.invoice_number,
+          date: inv.invoice_date,
+          vendorName: inv.vendor_name,
+          total: String(inv.total),
+          text: inv.ocr_text
+        },
+        extractedData: {
+          vendorName: inv.vendor_name,
+          invoiceNumber: inv.invoice_number,
+          totalAmount: String(inv.total),
+          currency: inv.currency,
+          taxRate: inv.tax ? String(inv.tax) : '0',
+          paymentTerms: inv.payment_terms || 'Net 30'
+        }
+      }))
+      const merged = [...mapped, ...MOCK_REVIEW_QUEUE]
+      setQueue(merged)
+      
+      // Keep selection synced or default to first queue item
+      if (merged.length > 0) {
+        setSelected(prevSelected => {
+          if (prevSelected) {
+            const found = merged.find(q => q.id === prevSelected.id && q.isBackend === prevSelected.isBackend)
+            if (found) return found
+          }
+          return merged[0]
+        })
+      } else {
+        setSelected(null)
+      }
+    } catch (err) {
+      console.error('Failed to load review queue:', err)
+      setQueue(MOCK_REVIEW_QUEUE)
+      setSelected(MOCK_REVIEW_QUEUE[0])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadQueue()
+  }, [loadQueue])
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     values: {
@@ -43,14 +107,64 @@ export default function ManualReviewPage() {
     }
   })
 
-  const onApprove = (data) => {
-    toast.success(`Invoice ${selected.id} approved and sent to payment processing.`)
-    setApproveModal(false)
+  const onApprove = async () => {
+    if (selected?.isBackend) {
+      try {
+        await invoiceService.approve(selected.id, approvalNotes)
+        toast.success(`Invoice ${selected.id} approved successfully.`)
+        setApproveModal(false)
+        setApprovalNotes('')
+        loadQueue()
+      } catch (err) {
+        toast.error(`Failed to approve: ${err.message || 'Server error'}`)
+      }
+    } else {
+      toast.success(`Invoice ${selected.id} approved and sent to payment processing.`)
+      setApproveModal(false)
+    }
   }
 
-  const onReject = (data) => {
-    toast.error(`Invoice ${selected.id} rejected. Notification sent to vendor.`)
-    setRejectModal(false)
+  const onReject = async () => {
+    if (!rejectReason) {
+      toast.error('Rejection reason is required.')
+      return
+    }
+    if (selected?.isBackend) {
+      try {
+        await invoiceService.reject(selected.id, rejectReason)
+        toast.error(`Invoice ${selected.id} has been rejected.`)
+        setRejectModal(false)
+        setRejectReason('')
+        loadQueue()
+      } catch (err) {
+        toast.error(`Failed to reject: ${err.message || 'Server error'}`)
+      }
+    } else {
+      toast.error(`Invoice ${selected.id} rejected. Notification sent to vendor.`)
+      setRejectModal(false)
+    }
+  }
+
+  const handleSave = async (formData) => {
+    if (selected?.isBackend) {
+      try {
+        const payload = {
+          vendor_name: formData.vendorName,
+          invoice_number: formData.invoiceNumber,
+          total: Number(formData.totalAmount),
+          currency: formData.currency,
+          tax: formData.taxRate ? Number(formData.taxRate) : null,
+          payment_terms: formData.paymentTerms || null
+        }
+        await invoiceService.update(selected.id, payload)
+        toast.success('Changes saved successfully.')
+        loadQueue()
+      } catch (err) {
+        toast.error(`Failed to save changes: ${err.message || 'Server error'}`)
+      }
+    } else {
+      toast.success('Changes saved (mock).')
+    }
   }
 
   return (
@@ -60,7 +174,7 @@ export default function ManualReviewPage() {
         <div className="mt-3">
           <h1 className="page-title">Manual Review Center</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {MOCK_REVIEW_QUEUE.length} invoices awaiting review
+            {queue.length} invoices awaiting review
           </p>
         </div>
       </div>
@@ -70,11 +184,11 @@ export default function ManualReviewPage() {
         <div className="xl:col-span-1">
           <Card title="Review Queue" subtitle="Select to review" noPadding>
             <div className="divide-y divide-gray-50">
-              {MOCK_REVIEW_QUEUE.map(item => (
+              {queue.map(item => (
                 <button
-                  key={item.id}
+                  key={`${item.isBackend ? 'b' : 'm'}-${item.id}`}
                   onClick={() => setSelected(item)}
-                  className={`w-full text-left p-4 hover:bg-blue-50 transition-colors ${selected?.id === item.id ? 'bg-blue-50 border-r-2 border-r-blue-600' : ''}`}
+                  className={`w-full text-left p-4 hover:bg-blue-50 transition-colors ${selected?.id === item.id && selected?.isBackend === item.isBackend ? 'bg-blue-50 border-r-2 border-r-blue-600' : ''}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -136,11 +250,21 @@ export default function ManualReviewPage() {
                 <div className="mt-4 space-y-1.5">
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">OCR Extracted Data</p>
                   {Object.entries(selected.ocrData || {}).map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-xs py-1 border-b border-gray-50">
-                      <span className="text-gray-500 capitalize">{k.replace(/([A-Z])/g, ' $1')}</span>
-                      <span className="font-medium text-gray-900 font-mono">{v}</span>
-                    </div>
+                    k !== 'text' && (
+                      <div key={k} className="flex justify-between text-xs py-1 border-b border-gray-50">
+                        <span className="text-gray-500 capitalize">{k.replace(/([A-Z])/g, ' $1')}</span>
+                        <span className="font-medium text-gray-900 font-mono">{v}</span>
+                      </div>
+                    )
                   ))}
+                  {selected.ocrData?.text && (
+                    <div className="mt-3 border-t border-gray-100 pt-3">
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">OCR Raw Text Output</p>
+                      <pre className="bg-gray-50 p-2 rounded text-[10px] font-mono text-gray-600 max-h-32 overflow-y-auto whitespace-pre-wrap leading-relaxed border border-gray-150">
+                        {selected.ocrData.text}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               </Card>
 
@@ -176,7 +300,7 @@ export default function ManualReviewPage() {
 
             {/* Editable Form */}
             <Card title="Editable Invoice Data" subtitle="Correct any extraction errors before approving" action={<Edit3 className="w-4 h-4 text-gray-400" />}>
-              <form className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <form className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" onSubmit={handleSubmit(handleSave)}>
                 <Input
                   label="Vendor Name"
                   {...register('vendorName', { required: 'Required' })}
@@ -210,7 +334,7 @@ export default function ManualReviewPage() {
                   <Button variant="secondary" type="button" onClick={() => reset()}>
                     Reset
                   </Button>
-                  <Button type="button" onClick={() => toast.success('Changes saved.')}>
+                  <Button type="submit">
                     Save Changes
                   </Button>
                 </div>
@@ -239,7 +363,13 @@ export default function ManualReviewPage() {
           <strong>{selected?.vendor}</strong> for{' '}
           <strong>{formatCurrency(selected?.amount || 0, selected?.currency)}</strong>.
         </p>
-        <Textarea label="Approval Notes (optional)" placeholder="Add any notes for the audit trail…" className="mt-4" />
+        <Textarea 
+          label="Approval Notes (optional)" 
+          placeholder="Add any notes for the audit trail…" 
+          className="mt-4" 
+          value={approvalNotes}
+          onChange={(e) => setApprovalNotes(e.target.value)}
+        />
       </Modal>
 
       {/* Reject Modal */}
@@ -259,7 +389,13 @@ export default function ManualReviewPage() {
         <p className="text-sm text-gray-600 mb-4">
           Please provide a reason for rejecting <strong>{selected?.id}</strong>. The vendor will be notified.
         </p>
-        <Textarea label="Rejection Reason" placeholder="Describe the issue with this invoice…" required />
+        <Textarea 
+          label="Rejection Reason" 
+          placeholder="Describe the issue with this invoice…" 
+          required 
+          value={rejectReason}
+          onChange={(e) => setRejectReason(e.target.value)}
+        />
       </Modal>
     </div>
   )

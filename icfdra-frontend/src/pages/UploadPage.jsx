@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Upload, FileText, Eye, ArrowRight, CheckCircle, AlertCircle, Clock } from 'lucide-react'
 import FileUpload from '../components/ui/FileUpload'
@@ -44,9 +44,76 @@ export default function UploadPage() {
   const [uploadedFiles, setUploadedFiles] = useState([])
   const [submitted, setSubmitted] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [activeUploads, setActiveUploads] = useState([])
+  const [historyData, setHistoryData] = useState([])
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await invoiceService.getHistory()
+      const mapped = res.map(inv => ({
+        id: `UPL-${inv.id}`,
+        filename: inv.filename || `invoice-${inv.id}.pdf`,
+        vendor: inv.vendor_name || 'Pending Extraction',
+        size: inv.file_size ? `${(inv.file_size / (1024 * 1024)).toFixed(2)} MB` : '—',
+        status: inv.status === 'APPROVED' || inv.status === 'PENDING_REVIEW' ? 'processed' : inv.status === 'FAILED' ? 'rejected' : 'processing',
+        uploadedAt: inv.created_at,
+        invoiceId: inv.id
+      }))
+      // Merge with mock history
+      setHistoryData([...mapped, ...MOCK_UPLOAD_HISTORY])
+    } catch (err) {
+      console.error('Failed to load upload history:', err)
+      setHistoryData(MOCK_UPLOAD_HISTORY)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadHistory()
+  }, [loadHistory])
 
   const handleFiles = (files) => {
     setUploadedFiles(files)
+  }
+
+  const pollInvoiceStatus = (invoiceId, tempId) => {
+    const interval = setInterval(async () => {
+      try {
+        const inv = await invoiceService.getById(invoiceId)
+        const status = inv.status
+        
+        let stage = 'OCR Processing'
+        let uiStatus = 'processing'
+        let shouldStop = false
+
+        if (status === 'OCR_PROCESSING' || status === 'OCR_COMPLETED') {
+          stage = 'OCR Processing'
+        } else if (status === 'AI_PROCESSING' || status === 'EXTRACTED') {
+          stage = 'AI Extraction'
+        } else if (status === 'PENDING_REVIEW' || status === 'APPROVED' || status === 'REJECTED') {
+          stage = 'Completed'
+          uiStatus = 'done'
+          shouldStop = true
+        } else if (status === 'FAILED') {
+          stage = 'Failed'
+          uiStatus = 'failed'
+          shouldStop = true
+        }
+
+        setActiveUploads(prev => prev.map(u => u.id === tempId ? { ...u, stage, status: uiStatus } : u))
+
+        if (shouldStop) {
+          clearInterval(interval)
+          if (uiStatus === 'done') {
+            toast.success(`Processing completed for ${inv.filename || 'invoice'}!`)
+          } else {
+            toast.error(`Processing failed for ${inv.filename || 'invoice'}.`)
+          }
+          loadHistory()
+        }
+      } catch (err) {
+        console.error('Error polling status for invoice:', invoiceId, err)
+      }
+    }, 1500)
   }
 
   const handleSubmit = async () => {
@@ -56,12 +123,22 @@ export default function UploadPage() {
     }
 
     setUploading(true)
-    let successCount = 0
 
-    for (const fileObj of uploadedFiles) {
+    const initialUploads = uploadedFiles.map(fileObj => ({
+      id: Math.random().toString(36).slice(2, 9),
+      filename: fileObj.name,
+      size: fileObj.size,
+      progress: 0,
+      stage: 'Uploading',
+      invoiceId: null,
+      status: 'processing'
+    }))
+    setActiveUploads(initialUploads)
+
+    uploadedFiles.forEach(async (fileObj, index) => {
+      const tempId = initialUploads[index].id
       const formData = new FormData()
 
-      // Generate a temporary unique invoice number to avoid backend duplication checks
       const randomId = Math.random().toString(36).slice(2, 8).toUpperCase()
       const tempInvoiceNo = `INV-TEMP-${randomId}`
       const todayStr = new Date().toISOString().split('T')[0]
@@ -74,21 +151,35 @@ export default function UploadPage() {
       formData.append('total', '0')
 
       try {
-        await invoiceService.upload(formData)
-        successCount++
+        const response = await invoiceService.upload(formData, (progress) => {
+          setActiveUploads(prev => prev.map(u => u.id === tempId ? { ...u, progress } : u))
+        })
+        
+        const invoiceId = response.id
+        setActiveUploads(prev => prev.map(u => u.id === tempId ? { 
+          ...u, 
+          progress: 100, 
+          invoiceId, 
+          stage: 'OCR Processing' 
+        } : u))
+
+        pollInvoiceStatus(invoiceId, tempId)
+
       } catch (err) {
         console.error('File upload failed:', fileObj.name, err)
-        const errorDetail = err.detail || err.message || 'Connection or server error'
+        const errorDetail = err.response?.data?.detail || err.detail || err.message || 'Server error'
         toast.error(`Failed to upload ${fileObj.name}: ${errorDetail}`)
+        setActiveUploads(prev => prev.map(u => u.id === tempId ? { 
+          ...u, 
+          stage: 'Failed', 
+          status: 'failed' 
+        } : u))
       }
-    }
+    })
 
+    setUploadedFiles([])
+    setSubmitted(true)
     setUploading(false)
-
-    if (successCount > 0) {
-      setSubmitted(true)
-      toast.success(`${successCount} file(s) uploaded successfully! Processing initiated.`)
-    }
   }
 
   return (
@@ -161,6 +252,40 @@ export default function UploadPage() {
               </div>
             </Card>
           )}
+
+          {/* Active Processing Queue */}
+          {activeUploads.length > 0 && (
+            <Card title="Active Processing Queue">
+              <div className="space-y-4">
+                {activeUploads.map(upload => (
+                  <div key={upload.id} className="p-3 bg-gray-50 rounded-lg border border-gray-150 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-gray-700 truncate max-w-[250px]">{upload.filename}</span>
+                      <span className={`font-semibold ${
+                        upload.status === 'done' ? 'text-emerald-600' :
+                        upload.status === 'failed' ? 'text-red-600' :
+                        'text-blue-600'
+                      }`}>{upload.stage}</span>
+                    </div>
+                    {upload.stage === 'Uploading' && (
+                      <div className="space-y-1">
+                        <div className="progress-bar">
+                          <div className="progress-fill bg-blue-600" style={{ width: `${upload.progress}%` }} />
+                        </div>
+                        <p className="text-[10px] text-gray-400 text-right">{upload.progress}% uploaded</p>
+                      </div>
+                    )}
+                    {upload.stage !== 'Uploading' && upload.status === 'processing' && (
+                      <div className="flex items-center gap-1.5 text-[10px] text-gray-500 animate-pulse mt-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                        AI is reading and parsing invoice data...
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
 
         {/* Info Panel */}
@@ -216,13 +341,13 @@ export default function UploadPage() {
         title="Upload History"
         subtitle="Recent document uploads"
         action={
-          <span className="text-xs text-gray-400">{MOCK_UPLOAD_HISTORY.length} records</span>
+          <span className="text-xs text-gray-400">{historyData.length} records</span>
         }
         noPadding
       >
         <Table
           columns={HISTORY_COLUMNS}
-          data={MOCK_UPLOAD_HISTORY}
+          data={historyData}
         />
       </Card>
     </div>

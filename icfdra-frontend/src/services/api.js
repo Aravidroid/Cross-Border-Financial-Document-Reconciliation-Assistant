@@ -46,7 +46,9 @@ export const invoiceService = {
     }),
   approve: (id, notes) => api.post(`/invoices/${id}/approve`, { notes }),
   reject: (id, reason) => api.post(`/invoices/${id}/reject`, { reason }),
+  update: (id, data) => api.put(`/invoices/${id}`, data),
   getHistory: (params) => api.get('/invoices/upload-history', { params }),
+  getAuditLogs: (params) => api.get('/invoices/audit-logs', { params }),
 }
 
 // ─── Analytics Service ────────────────────────────────────────────────────────

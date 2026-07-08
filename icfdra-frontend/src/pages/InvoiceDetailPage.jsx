@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, CheckCircle, XCircle, Clock, AlertTriangle,
@@ -14,6 +14,7 @@ import {
   getStatusColor, getStatusLabel, getRiskColor, COUNTRY_FLAGS
 } from '../utils/helpers'
 import toast from 'react-hot-toast'
+import { invoiceService } from '../services/api'
 
 function InfoRow({ label, value, mono = false }) {
   return (
@@ -24,7 +25,17 @@ function InfoRow({ label, value, mono = false }) {
   )
 }
 
-function TimelineItem({ event, timestamp, actor, isLast }) {
+const stripMarkdown = (text) => {
+  if (!text) return ''
+  return text
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/#/g, '')
+    .replace(/`/g, '')
+    .trim()
+}
+
+function TimelineItem({ event, timestamp, actor, details, isLast }) {
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
@@ -33,7 +44,8 @@ function TimelineItem({ event, timestamp, actor, isLast }) {
       </div>
       <div className="pb-4">
         <p className="text-sm font-medium text-gray-800">{event}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{formatDateTime(timestamp)} · {actor}</p>
+        {details && <p className="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap">{details}</p>}
+        <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(timestamp)} · {actor}</p>
       </div>
     </div>
   )
@@ -42,14 +54,153 @@ function TimelineItem({ event, timestamp, actor, isLast }) {
 export default function InvoiceDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const invoice = MOCK_INVOICES.find(inv => inv.id === id) || MOCK_INVOICES[0]
+  const [invoice, setInvoice] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  const handleApprove = () => {
-    toast.success(`Invoice ${invoice.id} approved successfully.`)
+  const handleApprove = async () => {
+    if (invoice?.isBackend) {
+      try {
+        await invoiceService.approve(invoice.id, 'Manually approved from details page')
+        toast.success(`Invoice ${invoice.id} approved successfully.`)
+        fetchInvoice()
+      } catch (err) {
+        toast.error(`Failed to approve: ${err.message || 'Server error'}`)
+      }
+    } else {
+      toast.success(`Invoice ${invoice.id} approved successfully.`)
+    }
   }
-  const handleReject = () => {
-    toast.error(`Invoice ${invoice.id} has been rejected.`)
+
+  const handleReject = async () => {
+    if (invoice?.isBackend) {
+      try {
+        await invoiceService.reject(invoice.id, 'Manually rejected from details page')
+        toast.error(`Invoice ${invoice.id} has been rejected.`)
+        fetchInvoice()
+      } catch (err) {
+        toast.error(`Failed to reject: ${err.message || 'Server error'}`)
+      }
+    } else {
+      toast.error(`Invoice ${invoice.id} has been rejected.`)
+    }
   }
+
+  const fetchInvoice = async () => {
+    try {
+      const data = await invoiceService.getById(id)
+      const mapped = {
+        id: data.id,
+        isBackend: true,
+        status: data.status === 'PENDING_REVIEW' ? 'pending_review' : data.status === 'APPROVED' ? 'approved' : data.status === 'REJECTED' ? 'rejected' : 'processing',
+        rawStatus: data.status,
+        riskLevel: data.risk_level || 'low',
+        amount: Number(data.total),
+        currency: data.currency,
+        amountUSD: Number(data.converted_total || data.total),
+        fxRate: Number(data.fx_rate || 1.0),
+        dueDate: data.due_date || '—',
+        paymentTerms: data.payment_terms || 'Net 30',
+        confidence: data.confidence_score ? Math.round(data.confidence_score) : 90,
+        category: data.category || 'General Invoicing',
+        validationIssues: data.validation_issues || [],
+        vendor: data.vendor_name,
+        vendorCountry: data.vendor_country || 'US',
+        taxId: data.tax_id || '—',
+        invoiceNumber: data.invoice_number,
+        poNumber: data.po_number || '—',
+        items: data.items ? data.items.map(item => ({
+          description: item.description,
+          quantity: Number(item.quantity || 1),
+          unitPrice: Number(item.unit_price || 0),
+          total: Number(item.line_total || 0)
+        })) : [],
+        aiRiskSummary: stripMarkdown(data.ai_risk_summary || 'No risk analysis generated yet.'),
+        uploadedAt: data.created_at,
+        timeline: data.audit_logs && data.audit_logs.length > 0
+          ? data.audit_logs.map(log => ({
+              event: log.action,
+              timestamp: log.created_at,
+              actor: log.actor || 'System',
+              details: log.details
+            }))
+          : [
+              { event: 'Uploaded & Seeded', timestamp: data.created_at, actor: 'System' },
+              ...(data.ocr_text ? [{ event: 'OCR Ingestion Done', timestamp: data.created_at, actor: 'AI OCR' }] : []),
+              ...(data.extracted_json ? [{ event: 'AI Extraction Done', timestamp: data.created_at, actor: 'Gemini' }] : []),
+              ...(data.status === 'PENDING_REVIEW' || data.status === 'APPROVED' || data.status === 'REJECTED' ? [{ event: 'Process Completed', timestamp: data.created_at, actor: 'AI System' }] : []),
+              ...(data.status === 'APPROVED' ? [{ event: 'Approved', timestamp: data.created_at, actor: 'Reviewer' }] : []),
+              ...(data.status === 'REJECTED' ? [{ event: 'Rejected', timestamp: data.created_at, actor: 'Reviewer' }] : []),
+            ],
+        ocrText: data.ocr_text,
+        ocrConfidence: data.ocr_confidence,
+        extractedJson: data.extracted_json
+      }
+      setInvoice(mapped)
+      return mapped
+    } catch (err) {
+      console.log('Backend fetch failed, searching in mock invoices:', err)
+      const mock = MOCK_INVOICES.find(inv => String(inv.id) === String(id))
+      setInvoice(mock || MOCK_INVOICES[0])
+      return mock || MOCK_INVOICES[0]
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    
+    const init = async () => {
+      const inv = await fetchInvoice()
+      if (active) setLoading(false)
+      
+      if (inv && inv.isBackend && ['UPLOADED', 'OCR_PROCESSING', 'OCR_COMPLETED', 'AI_PROCESSING', 'EXTRACTED'].includes(inv.rawStatus)) {
+        const interval = setInterval(async () => {
+          try {
+            const currentInv = await invoiceService.getById(id)
+            if (!active) {
+              clearInterval(interval)
+              return
+            }
+            if (!['UPLOADED', 'OCR_PROCESSING', 'OCR_COMPLETED', 'AI_PROCESSING', 'EXTRACTED'].includes(currentInv.status)) {
+              clearInterval(interval)
+              toast.success(`Invoice processing complete!`)
+              fetchInvoice()
+            }
+          } catch (e) {
+            console.error('Error polling status:', e)
+          }
+        }, 2000)
+
+        return () => {
+          clearInterval(interval)
+        }
+      }
+    }
+    
+    init()
+    
+    return () => {
+      active = false
+    }
+  }, [id])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
+          <p className="text-sm text-gray-500 font-medium">Loading invoice details...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!invoice) {
+    return <div className="p-5 text-gray-500">Invoice not found.</div>
+  }
+
+  const aiConfidenceValue = invoice.confidence || 90
+  const ocrConfidenceValue = invoice.ocrConfidence ? Math.round(invoice.ocrConfidence) : Math.min(100, aiConfidenceValue + 5)
 
   return (
     <div className="space-y-6">
@@ -57,7 +208,7 @@ export default function InvoiceDetailPage() {
       <div>
         <Breadcrumb items={[
           { label: 'Invoice Details', href: '/invoices' },
-          { label: invoice.id }
+          { label: invoice.invoiceNumber || invoice.id }
         ]} />
         <div className="flex flex-wrap items-center justify-between gap-4 mt-3">
           <div className="flex items-center gap-3">
@@ -65,7 +216,7 @@ export default function InvoiceDetailPage() {
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
-              <h1 className="page-title">{invoice.id}</h1>
+              <h1 className="page-title">{invoice.invoiceNumber || invoice.id}</h1>
               <div className="flex items-center gap-2 mt-1">
                 <Badge color={getStatusColor(invoice.status)} dot>
                   {getStatusLabel(invoice.status)}
@@ -202,33 +353,87 @@ export default function InvoiceDetailPage() {
               </span></p>
             </div>
           </Card>
+
+          {/* OCR & AI Raw Data Details */}
+          {invoice.isBackend && invoice.ocrText && (
+            <Card title="OCR & AI Extraction Details" subtitle={`OCR Confidence: ${invoice.ocrConfidence ?? '—'}%`}>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">OCR Raw Text Output</p>
+                  <pre className="bg-gray-50 p-3 rounded-lg text-xs font-mono text-gray-700 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed border border-gray-200">
+                    {invoice.ocrText}
+                  </pre>
+                </div>
+                {invoice.extractedJson && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">AI Extracted JSON Structure</p>
+                    <pre className="bg-gray-50 p-3 rounded-lg text-xs font-mono text-gray-700 max-h-48 overflow-y-auto whitespace-pre leading-relaxed border border-gray-200">
+                      {JSON.stringify(invoice.extractedJson, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
         </div>
 
         {/* Right column */}
         <div className="space-y-5">
           {/* AI Risk Summary */}
           <Card title="AI Risk Summary" action={<Shield className="w-4 h-4 text-blue-500" />}>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="relative w-14 h-14 flex-shrink-0">
-                <svg viewBox="0 0 36 36" className="w-14 h-14 -rotate-90">
-                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f3f4f6" strokeWidth="3" />
-                  <circle
-                    cx="18" cy="18" r="15.9" fill="none"
-                    stroke={invoice.confidence >= 85 ? '#059669' : invoice.confidence >= 65 ? '#d97706' : '#dc2626'}
-                    strokeWidth="3"
-                    strokeDasharray={`${invoice.confidence} 100`}
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-gray-900">
-                  {invoice.confidence}%
-                </span>
+            <div className="flex flex-wrap items-center gap-6 mb-4">
+              {/* OCR Confidence Gauge */}
+              <div className="flex items-center gap-3">
+                <div className="relative w-12 h-12 flex-shrink-0">
+                  <svg viewBox="0 0 36 36" className="w-12 h-12 -rotate-90">
+                    <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f3f4f6" strokeWidth="3" />
+                    <circle
+                      cx="18" cy="18" r="15.9" fill="none"
+                      stroke={ocrConfidenceValue >= 85 ? '#059669' : ocrConfidenceValue >= 65 ? '#d97706' : '#dc2626'}
+                      strokeWidth="3"
+                      strokeDasharray={`${ocrConfidenceValue} 100`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-900">
+                    {ocrConfidenceValue}%
+                  </span>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">OCR Ingestion</p>
+                  <p className="text-xs font-semibold text-gray-700">Confidence</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-800">Confidence Score</p>
-                <Badge color={getRiskColor(invoice.riskLevel)}>{invoice.riskLevel} risk</Badge>
+
+              {/* AI Extraction Confidence Gauge */}
+              <div className="flex items-center gap-3">
+                <div className="relative w-12 h-12 flex-shrink-0">
+                  <svg viewBox="0 0 36 36" className="w-12 h-12 -rotate-90">
+                    <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f3f4f6" strokeWidth="3" />
+                    <circle
+                      cx="18" cy="18" r="15.9" fill="none"
+                      stroke={aiConfidenceValue >= 85 ? '#059669' : aiConfidenceValue >= 65 ? '#d97706' : '#dc2626'}
+                      strokeWidth="3"
+                      strokeDasharray={`${aiConfidenceValue} 100`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-900">
+                    {aiConfidenceValue}%
+                  </span>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">AI Extraction</p>
+                  <p className="text-xs font-semibold text-gray-700">Confidence</p>
+                </div>
               </div>
             </div>
+
+            <div className="flex items-center justify-between border-t border-gray-50 pt-3.5 mb-3.5">
+              <span className="text-xs font-medium text-gray-500">Security & Risk Status</span>
+              <Badge color={getRiskColor(invoice.riskLevel)}>{invoice.riskLevel} risk</Badge>
+            </div>
+
             <p className="text-sm text-gray-600 leading-relaxed">{invoice.aiRiskSummary}</p>
           </Card>
 
@@ -248,6 +453,7 @@ export default function InvoiceDetailPage() {
                   event={t.event}
                   timestamp={t.timestamp}
                   actor={t.actor}
+                  details={t.details}
                   isLast={i === invoice.timeline.length - 1}
                 />
               ))}

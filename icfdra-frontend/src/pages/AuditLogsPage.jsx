@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { invoiceService } from '../services/api'
 import { Download, Filter, Calendar } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
@@ -75,7 +76,32 @@ function TimelineView({ logs }) {
 
 export default function AuditLogsPage() {
   const [view, setView] = useState('table')
-  const { data, totalCount, search, setSearch, sort, pagination, setFilter } = useTable(MOCK_AUDIT_LOGS, { pageSize: 8 })
+  const [logsList, setLogsList] = useState(MOCK_AUDIT_LOGS)
+
+  useEffect(() => {
+    async function loadLogs() {
+      try {
+        const logs = await invoiceService.getAuditLogs({ limit: 200 })
+        if (logs && logs.length > 0) {
+          const mappedLogs = logs.map(l => ({
+            id: `LOG-${l.id}`,
+            action: l.action,
+            actor: l.actor || 'System',
+            target: `INV-ID-${l.invoice_id}`,
+            details: l.details || '',
+            severity: l.severity || 'info',
+            timestamp: l.created_at
+          }))
+          setLogsList([...mappedLogs, ...MOCK_AUDIT_LOGS])
+        }
+      } catch (err) {
+        console.error("Failed to load global audit logs:", err)
+      }
+    }
+    loadLogs()
+  }, [])
+
+  const { data, totalCount, search, setSearch, sort, pagination, setFilter } = useTable(logsList, { pageSize: 8 })
 
   const handleExport = () => {
     toast.success('Audit log CSV exported successfully.')
@@ -89,7 +115,7 @@ export default function AuditLogsPage() {
           <div>
             <h1 className="page-title">Audit Logs</h1>
             <p className="text-sm text-gray-500 mt-1">
-              Complete activity trail · {MOCK_AUDIT_LOGS.length} records
+              Complete activity trail · {logsList.length} records
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -110,10 +136,10 @@ export default function AuditLogsPage() {
       {/* Summary badges */}
       <div className="flex flex-wrap gap-3">
         {[
-          { label: 'Total Events', count: MOCK_AUDIT_LOGS.length, color: 'blue' },
-          { label: 'Approvals', count: MOCK_AUDIT_LOGS.filter(l => l.severity === 'success').length, color: 'green' },
-          { label: 'Rejections', count: MOCK_AUDIT_LOGS.filter(l => l.severity === 'error').length, color: 'red' },
-          { label: 'Warnings', count: MOCK_AUDIT_LOGS.filter(l => l.severity === 'warning').length, color: 'yellow' },
+          { label: 'Total Events', count: logsList.length, color: 'blue' },
+          { label: 'Approvals', count: logsList.filter(l => l.severity === 'success').length, color: 'green' },
+          { label: 'Rejections', count: logsList.filter(l => l.severity === 'error').length, color: 'red' },
+          { label: 'Warnings', count: logsList.filter(l => l.severity === 'warning').length, color: 'yellow' },
         ].map(item => (
           <div key={item.label} className="card px-4 py-2.5 flex items-center gap-3">
             <Badge color={item.color}>{item.count}</Badge>

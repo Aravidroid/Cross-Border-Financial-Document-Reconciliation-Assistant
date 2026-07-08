@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import create_tables
-from app.routers import invoices
+from app.routers import analytics, invoices
 
 
 # ==========================================================
@@ -84,3 +84,4 @@ def health():
     }
 
 app.include_router(invoices.router)
+app.include_router(analytics.router)
