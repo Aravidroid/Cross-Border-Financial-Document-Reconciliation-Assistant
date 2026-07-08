@@ -125,6 +125,14 @@ export default function InvoiceDetailPage() {
         currency: data.currency,
         amountUSD: Number(data.converted_total || data.total),
         fxRate: Number(data.fx_rate || 1.0),
+        baseCurrency: data.base_currency || 'INR',
+        invoiceFxRate: data.invoice_fx_rate ? Number(data.invoice_fx_rate) : null,
+        currentFxRate: data.current_fx_rate ? Number(data.current_fx_rate) : null,
+        fxVariance: data.fx_variance !== null && data.fx_variance !== undefined ? Number(data.fx_variance) : null,
+        fxGainLoss: data.fx_gain_loss !== null && data.fx_gain_loss !== undefined ? Number(data.fx_gain_loss) : null,
+        fxRiskLevel: data.fx_risk_level || 'LOW',
+        fxRecommendation: data.fx_recommendation || 'Pay anytime.',
+        fxRateTimestamp: data.fx_rate_timestamp || null,
         dueDate: data.due_date || '—',
         paymentTerms: data.payment_terms || 'Net 30',
         confidence: data.confidence_score ? Math.round(data.confidence_score) : 90,
@@ -522,31 +530,74 @@ export default function InvoiceDetailPage() {
           </Card>
 
           {/* FX Section */}
-          <Card title="FX Conversion Details">
+          <Card title="FX Conversion Details" action={
+            invoice.isBackend && invoice.fxRiskLevel && (
+              <Badge color={invoice.fxRiskLevel === 'LOW' ? 'green' : invoice.fxRiskLevel === 'MEDIUM' ? 'yellow' : 'red'}>
+                {invoice.fxRiskLevel} RISK
+              </Badge>
+            )
+          }>
             <div className="grid grid-cols-3 gap-4">
-              <div className="bg-gray-50 p-3 rounded-lg text-center">
+              <div className="bg-gray-50 p-3 rounded-lg text-center border border-gray-100">
                 <p className="text-xs text-gray-500">Source Amount</p>
                 <p className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(invoice.amount, invoice.currency)}</p>
                 <p className="text-xs text-gray-400">{invoice.currency}</p>
               </div>
               <div className="flex items-center justify-center text-gray-400">
                 <div className="text-center">
-                  <div className="text-2xl">→</div>
-                  <p className="text-xs mt-1">Rate: <span className="font-semibold text-gray-700">{invoice.fxRate}</span></p>
-                  <p className="text-[10px] text-gray-400">ECB Reference</p>
+                  <div className="text-xl">→</div>
+                  <p className="text-xs mt-1">Rate: <span className="font-semibold text-gray-700">{invoice.fxRate?.toFixed(4)}</span></p>
+                  <p className="text-[9px] text-gray-400">Frankfurter Reference</p>
                 </div>
               </div>
-              <div className="bg-blue-50 p-3 rounded-lg text-center">
-                <p className="text-xs text-gray-500">USD Equivalent</p>
-                <p className="text-lg font-bold text-blue-700 mt-1">{formatCurrency(invoice.amountUSD)}</p>
-                <p className="text-xs text-gray-400">USD</p>
+              <div className="bg-blue-50 p-3 rounded-lg text-center border border-blue-100">
+                <p className="text-xs text-gray-500">{invoice.baseCurrency || 'INR'} Equivalent</p>
+                <p className="text-lg font-bold text-blue-700 mt-1">{formatCurrency(invoice.amountUSD, invoice.baseCurrency || 'INR')}</p>
+                <p className="text-xs text-gray-400">{invoice.baseCurrency || 'INR'}</p>
               </div>
             </div>
-            <div className="mt-3 p-2.5 bg-gray-50 rounded-lg">
-              <p className="text-xs text-gray-500">Rate Source: European Central Bank · Deviation from interbank: <span className={invoice.riskLevel === 'high' || invoice.riskLevel === 'critical' ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'}>
-                {invoice.riskLevel === 'high' ? '+2.3%' : invoice.riskLevel === 'critical' ? '+4.1%' : '<0.5%'}
-              </span></p>
-            </div>
+
+            {invoice.isBackend && invoice.invoiceFxRate !== undefined && invoice.invoiceFxRate !== null && (
+              <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100/50">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Historical Rate</p>
+                    <p className="text-sm font-bold text-gray-800 mt-0.5 font-mono">{Number(invoice.invoiceFxRate || 1.0).toFixed(4)}</p>
+                    <p className="text-[9px] text-gray-400">On invoice date</p>
+                  </div>
+                  <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100/50">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Current Rate</p>
+                    <p className="text-sm font-bold text-gray-800 mt-0.5 font-mono">{Number(invoice.currentFxRate || 1.0).toFixed(4)}</p>
+                    <p className="text-[9px] text-gray-400">Latest feed</p>
+                  </div>
+                  <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100/50">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">FX Variance</p>
+                    <p className={`text-sm font-bold mt-0.5 font-mono ${invoice.fxVariance >= 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {invoice.fxVariance >= 0 ? '+' : ''}{Number(invoice.fxVariance || 0).toFixed(2)}%
+                    </p>
+                    <p className="text-[9px] text-gray-400">{invoice.fxVariance >= 0 ? 'Adverse' : 'Favorable'}</p>
+                  </div>
+                  <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100/50">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">FX Gain / Loss</p>
+                    <p className={`text-sm font-bold mt-0.5 font-mono ${invoice.fxGainLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {invoice.fxGainLoss >= 0 ? '+' : ''}{formatCurrency(invoice.fxGainLoss || 0, invoice.baseCurrency || 'INR')}
+                    </p>
+                    <p className="text-[9px] text-gray-400">{invoice.fxGainLoss >= 0 ? 'Savings' : 'Extra Cost'}</p>
+                  </div>
+                </div>
+
+                <div className="bg-purple-50 p-3 rounded-lg border border-purple-100/85">
+                  <p className="text-xs font-semibold text-purple-800">Payment Recommendation:</p>
+                  <p className="text-xs text-purple-750 mt-0.5 italic">"{invoice.fxRecommendation}"</p>
+                </div>
+
+                {invoice.fxRateTimestamp && (
+                  <p className="text-[10px] text-gray-450 text-right">
+                    Rates feed date: {formatDateTime(invoice.fxRateTimestamp)}
+                  </p>
+                )}
+              </div>
+            )}
           </Card>
 
           {/* OCR & AI Raw Data Details */}

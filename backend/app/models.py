@@ -51,8 +51,16 @@ class Invoice(Base):
     tax: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
     total: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
 
-    # FX
+    # FX Intelligence
+    base_currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="USD")
     fx_rate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    invoice_fx_rate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    current_fx_rate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    fx_rate_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    fx_variance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fx_gain_loss: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fx_risk_level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    fx_recommendation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     converted_total: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
 
     # Processing

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from app.config import settings
 from app.models import Invoice, AuditLog
 
 logger = logging.getLogger(__name__)
@@ -14,12 +15,36 @@ class FinanceService:
         approved = db.query(Invoice).filter(Invoice.status == "APPROVED").count()
         rejected = db.query(Invoice).filter(Invoice.status == "REJECTED").count()
         
-        # Calculate FX Exposure: sum of converted_total where currency != 'USD'
+        # Calculate FX Exposure: sum of converted_total where currency != settings.BASE_CURRENCY
+        base_currency = (settings.BASE_CURRENCY or "INR").upper().strip()
         fx_exposure_res = db.query(func.sum(Invoice.converted_total)).filter(
-            Invoice.currency != "USD",
+            Invoice.currency != base_currency,
             Invoice.status.in_(["PENDING_REVIEW", "APPROVED"])
         ).scalar()
         fx_exposure = float(fx_exposure_res) if fx_exposure_res is not None else 0.0
+
+        # Calculate High FX Risk Invoices count
+        high_fx_risk_count = db.query(Invoice).filter(
+            Invoice.fx_risk_level.in_(["HIGH", "CRITICAL"]),
+            Invoice.status.in_(["PENDING_REVIEW", "APPROVED"])
+        ).count()
+
+        # Calculate Average FX Variance (absolute average of foreign currency invoices)
+        avg_variance_res = db.query(func.avg(func.abs(Invoice.fx_variance))).filter(
+            Invoice.currency != base_currency,
+            Invoice.status.in_(["PENDING_REVIEW", "APPROVED"])
+        ).scalar()
+        avg_fx_variance = float(avg_variance_res) if avg_variance_res is not None else 0.0
+
+        # Calculate FX Risk Distribution
+        risk_dist_res = db.query(
+            Invoice.fx_risk_level,
+            func.count(Invoice.id).label("count")
+        ).filter(
+            Invoice.status.in_(["PENDING_REVIEW", "APPROVED"])
+        ).group_by(Invoice.fx_risk_level).all()
+        
+        fx_risk_distribution = {r.fx_risk_level or "LOW": r.count for r in risk_dist_res}
 
         # Avg processing time: avg difference between updated_at and created_at
         processing_times = db.query(Invoice.created_at, Invoice.updated_at).filter(
@@ -43,7 +68,10 @@ class FinanceService:
             "rejected": rejected,
             "fx_exposure": fx_exposure,
             "avg_processing_time": avg_time_str,
-            "auto_approval_rate": auto_rate
+            "auto_approval_rate": auto_rate,
+            "high_fx_risk_count": high_fx_risk_count,
+            "avg_fx_variance": avg_fx_variance,
+            "fx_risk_distribution": fx_risk_distribution,
         }
 
     def get_currency_distribution(self, db: Session) -> List[Dict[str, Any]]:
@@ -123,11 +151,12 @@ class FinanceService:
         ]
 
     def get_fx_exposure(self, db: Session) -> List[Dict[str, Any]]:
+        base_currency = (settings.BASE_CURRENCY or "INR").upper().strip()
         res = db.query(
             Invoice.currency,
             func.sum(Invoice.converted_total).label("value")
         ).filter(
-            Invoice.currency != "USD",
+            Invoice.currency != base_currency,
             Invoice.status.in_(["PENDING_REVIEW", "APPROVED"])
         ).group_by(Invoice.currency).all()
 

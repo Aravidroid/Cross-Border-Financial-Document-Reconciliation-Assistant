@@ -82,6 +82,11 @@ export default function ManualReviewPage() {
         complianceScore: inv.compliance_score !== null && inv.compliance_score !== undefined ? Math.round(inv.compliance_score) : null,
         complianceStatus: inv.compliance_status || null,
         complianceReport: inv.compliance_report || null,
+        fxRiskLevel: inv.fx_risk_level || 'LOW',
+        fxVariance: inv.fx_variance !== null && inv.fx_variance !== undefined ? Number(inv.fx_variance) : 0.0,
+        fxGainLoss: inv.fx_gain_loss !== null && inv.fx_gain_loss !== undefined ? Number(inv.fx_gain_loss) : 0.0,
+        fxRecommendation: inv.fx_recommendation || 'Pay anytime.',
+        baseCurrency: inv.base_currency || 'INR',
         dueIn: '3 days',
         assignedTo: 'AI System',
         ocrData: {
@@ -361,10 +366,7 @@ export default function ManualReviewPage() {
                         <p key={i} className="text-xs text-amber-700">• {issue}</p>
                       ))}
                     </div>
-                  )
-                )}
-
-                {/* Regulatory Compliance Firewall Side Summary */}
+                  ))}
                 {selected.complianceScore !== null && selected.complianceReport && (
                   <div className="mt-4 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-3">
                     <div className="flex items-center justify-between border-b border-indigo-50 pb-2">
@@ -396,6 +398,39 @@ export default function ManualReviewPage() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* FX Intelligence Firewall Side Summary */}
+                {selected.isBackend && selected.fxRiskLevel && (
+                  <div className="mt-4 p-3 bg-purple-50/50 border border-purple-100 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between border-b border-purple-50 pb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Shield className="w-4 h-4 text-purple-600" />
+                        <span className="text-xs font-bold text-gray-800">FX Intelligence Firewall</span>
+                      </div>
+                      <Badge color={selected.fxRiskLevel === 'LOW' ? 'green' : selected.fxRiskLevel === 'MEDIUM' ? 'yellow' : 'red'}>
+                        {selected.fxRiskLevel} RISK
+                      </Badge>
+                    </div>
+                    <div className="text-[11px] space-y-1.5 text-gray-600">
+                      <div className="flex justify-between">
+                        <span>FX Variance</span>
+                        <span className={`font-semibold font-mono ${selected.fxVariance >= 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                          {selected.fxVariance >= 0 ? '+' : ''}{Number(selected.fxVariance || 0).toFixed(2)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>FX Gain / Loss</span>
+                        <span className={`font-semibold font-mono ${selected.fxGainLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {formatCurrency(selected.fxGainLoss || 0, selected.baseCurrency || 'INR')}
+                        </span>
+                      </div>
+                      <div className="mt-2 pt-2 border-t border-purple-100/50">
+                        <p className="font-semibold text-gray-700">Recommendation:</p>
+                        <p className="text-gray-650 italic mt-0.5">"{selected.fxRecommendation}"</p>
+                      </div>
                     </div>
                   </div>
                 )}

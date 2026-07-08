@@ -57,6 +57,14 @@ class InvoiceResponse(BaseModel):
 
     fx_rate: Optional[Decimal] = None
     converted_total: Optional[Decimal] = None
+    base_currency: Optional[str] = None
+    invoice_fx_rate: Optional[Decimal] = None
+    current_fx_rate: Optional[Decimal] = None
+    fx_rate_timestamp: Optional[datetime] = None
+    fx_variance: Optional[float] = None
+    fx_gain_loss: Optional[float] = None
+    fx_risk_level: Optional[str] = None
+    fx_recommendation: Optional[str] = None
 
     confidence_score: Optional[float] = None
     validation_score: Optional[float] = None

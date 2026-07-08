@@ -65,7 +65,10 @@ export default function DashboardPage() {
             totalFXExposure: summary.fx_exposure,
             avgProcessingTime: summary.avg_processing_time,
             autoApprovalRate: summary.auto_approval_rate,
-            flaggedThisWeek: summary.pending_reviews
+            flaggedThisWeek: summary.pending_reviews,
+            highFXRiskCount: summary.high_fx_risk_count,
+            avgFXVariance: summary.avg_fx_variance,
+            fxRiskDistribution: summary.fx_risk_distribution
           })
         }
 
@@ -105,15 +108,15 @@ export default function DashboardPage() {
 
         if (invoicesList && invoicesList.length > 0) {
           const highRiskList = invoicesList
-            .filter(inv => inv.risk_level === 'high' || inv.risk_level === 'critical')
+            .filter(inv => inv.fx_risk_level === 'HIGH' || inv.fx_risk_level === 'CRITICAL' || inv.risk_level === 'high' || inv.risk_level === 'critical')
             .slice(0, 5)
             .map(inv => ({
               id: inv.id,
               invoiceNumber: inv.invoice_number,
               vendor: inv.vendor_name,
-              amount: inv.currency === 'USD' ? `$${Number(inv.total).toLocaleString()}` : `${inv.currency} ${Number(inv.total).toLocaleString()}`,
-              risk: inv.risk_level,
-              issue: inv.validation_issues?.[0] || 'Manual review required'
+              amount: formatCurrency(inv.total, inv.currency),
+              risk: inv.fx_risk_level?.toLowerCase() || inv.risk_level || 'low',
+              issue: inv.fx_recommendation || inv.validation_issues?.[0] || 'Manual review required'
             }))
           if (highRiskList.length > 0) {
             setHighRisk(highRiskList)
@@ -189,18 +192,16 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Total FX Exposure"
-          value={formatCurrency(stats.totalFXExposure)}
+          value={formatCurrency(stats.totalFXExposure, 'INR')}
           subtitle="Open positions"
           color="purple"
           icon={<TrendingUp className="w-5 h-5" />}
         />
         <StatCard
-          title="Avg Processing"
-          value={stats.avgProcessingTime}
-          subtitle="Per document"
+          title="Avg FX Variance"
+          value={`${Number(stats.avgFXVariance || 0).toFixed(2)}%`}
+          subtitle="Across exposures"
           color="blue"
-          change="↓ 18% faster"
-          changeDir="up"
           icon={<Clock className="w-5 h-5" />}
         />
         <StatCard
@@ -211,10 +212,10 @@ export default function DashboardPage() {
           icon={<Activity className="w-5 h-5" />}
         />
         <StatCard
-          title="Flagged This Week"
-          value={stats.flaggedThisWeek}
-          subtitle="For manual review"
-          color="yellow"
+          title="High FX Risk Invoices"
+          value={stats.highFXRiskCount || 0}
+          subtitle="Requires attention"
+          color="red"
           icon={<AlertTriangle className="w-5 h-5" />}
         />
       </div>
@@ -344,30 +345,30 @@ export default function DashboardPage() {
           </div>
         </Card>
 
-        {/* Recent Audit Logs */}
-        <Card
-          title="Recent Audit Logs"
-          action={
-            <Link to="/audit" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-              View all <ArrowRight className="w-3 h-3" />
-            </Link>
-          }
-        >
-          <div className="space-y-2">
-            {auditLogs.slice(0, 5).map(log => (
-              <div key={log.id} className="flex items-start gap-2.5 py-1.5 border-b border-gray-50 last:border-0">
-                <span className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
-                  log.severity === 'success' ? 'bg-emerald-500' :
-                  log.severity === 'error' ? 'bg-red-500' :
-                  log.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-400'
-                }`} />
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-gray-800">{log.action}</p>
-                  <p className="text-xs text-gray-500">{log.actor} · {log.invoice_id || log.target}</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{formatDateTime(log.created_at || log.timestamp)}</p>
+        {/* FX Risk Distribution */}
+        <Card title="FX Risk Distribution" subtitle="Active exposures">
+          <div className="space-y-4 py-2">
+            {[
+              { level: 'LOW', label: 'Low Risk', color: 'bg-emerald-500' },
+              { level: 'MEDIUM', label: 'Medium Risk', color: 'bg-amber-500' },
+              { level: 'HIGH', label: 'High Risk', color: 'bg-orange-500' },
+              { level: 'CRITICAL', label: 'Critical Risk', color: 'bg-red-600' }
+            ].map(r => {
+              const count = stats.fxRiskDistribution?.[r.level] || 0;
+              const total = Object.values(stats.fxRiskDistribution || {}).reduce((a, b) => a + b, 0) || 1;
+              const pct = Math.round((count / total) * 100);
+              return (
+                <div key={r.level} className="space-y-1">
+                  <div className="flex justify-between text-xs font-medium">
+                    <span className="text-gray-700">{r.label}</span>
+                    <span className="text-gray-500 font-semibold">{count} ({pct}%)</span>
+                  </div>
+                  <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
+                    <div className={`h-full ${r.color}`} style={{ width: `${pct}%` }} />
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Filter, Search } from 'lucide-react'
 import Card from '../components/ui/Card'
@@ -10,6 +10,7 @@ import { Select } from '../components/ui/Input'
 import { MOCK_INVOICES } from '../utils/mockData'
 import { formatCurrency, formatDate, getStatusColor, getStatusLabel, getRiskColor } from '../utils/helpers'
 import { useTable } from '../hooks/useTable'
+import { invoiceService } from '../services/api'
 
 const COLUMNS = [
   { key: 'id', label: 'Invoice ID', sortable: true, render: (v) => (
@@ -23,7 +24,7 @@ const COLUMNS = [
     render: (v, row) => (
       <div>
         <p className="font-semibold text-gray-900">{formatCurrency(v, row.currency)}</p>
-        <p className="text-xs text-gray-400">{formatCurrency(row.amountUSD)} USD</p>
+        <p className="text-xs text-gray-400">{formatCurrency(row.amountUSD, row.baseCurrency || 'INR')}</p>
       </div>
     )
   },
@@ -50,6 +51,25 @@ const COLUMNS = [
     )
   },
   {
+    key: 'fxRiskLevel',
+    label: 'FX Risk',
+    sortable: true,
+    render: (v) => {
+      const color = v === 'LOW' ? 'green' : v === 'MEDIUM' ? 'yellow' : 'red';
+      return <Badge color={color}>{v}</Badge>;
+    }
+  },
+  {
+    key: 'fxVariance',
+    label: 'FX Var',
+    sortable: true,
+    render: (v) => {
+      const color = Math.abs(v) < 2.0 ? 'text-emerald-600' : Math.abs(v) < 5.0 ? 'text-amber-500' : 'text-red-600';
+      const prefix = v > 0 ? '+' : '';
+      return <span className={`font-mono font-semibold text-xs ${color}`}>{prefix}{Number(v || 0).toFixed(2)}%</span>;
+    }
+  },
+  {
     key: 'uploadedAt',
     label: 'Date',
     sortable: true,
@@ -72,7 +92,42 @@ const COLUMNS = [
 
 export default function InvoiceListPage() {
   const navigate = useNavigate()
-  const { data, totalCount, search, setSearch, sort, pagination, setFilter } = useTable(MOCK_INVOICES, { pageSize: 8 })
+  const [invoices, setInvoices] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchInvoices() {
+      try {
+        const res = await invoiceService.list()
+        const mapped = res.map(inv => ({
+          id: inv.id,
+          vendor: inv.vendor_name,
+          invoiceNumber: inv.invoice_number,
+          amount: Number(inv.total),
+          currency: inv.currency,
+          amountUSD: Number(inv.converted_total || inv.total),
+          status: inv.status.toLowerCase(),
+          riskLevel: inv.risk_level || 'low',
+          confidence: inv.confidence_score ? Math.round(inv.confidence_score) : 90,
+          uploadedAt: inv.created_at,
+          fxRiskLevel: inv.fx_risk_level || 'LOW',
+          fxVariance: inv.fx_variance !== null && inv.fx_variance !== undefined ? Number(inv.fx_variance) : 0.0,
+          fxGainLoss: inv.fx_gain_loss !== null && inv.fx_gain_loss !== undefined ? Number(inv.fx_gain_loss) : 0.0,
+          fxRecommendation: inv.fx_recommendation || 'Pay anytime.',
+          baseCurrency: inv.base_currency || 'INR',
+        }))
+        setInvoices(mapped)
+      } catch (err) {
+        console.error("Failed to load live invoices:", err)
+        setInvoices(MOCK_INVOICES)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchInvoices()
+  }, [])
+
+  const { data, totalCount, search, setSearch, sort, pagination, setFilter } = useTable(invoices, { pageSize: 8 })
 
   return (
     <div className="space-y-6">

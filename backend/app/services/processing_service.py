@@ -5,9 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import Invoice, InvoiceItem, AuditLog
+from app.config import settings
 from app.services.ai_service import ai_service
 from app.services.gemini_service import gemini_service
 from app.services.validation_service import validation_service
+from app.services.fx_service import fx_service
 
 logger = logging.getLogger(__name__)
 
@@ -112,16 +114,33 @@ class ProcessingService:
             
             # Calculate FX rate and converted total
             currency = (invoice.currency or "USD").upper().strip()
+            base_currency = (settings.BASE_CURRENCY or "INR").upper().strip()
             total_val = float(invoice.total or 0.0)
-            rates = {
-                "USD": 1.0,
-                "EUR": 1.08,
-                "GBP": 1.27,
-                "JPY": 0.0066,
-                "CAD": 0.74,
-            }
-            invoice.fx_rate = invoice_json.get("fx_rate") or rates.get(currency, 1.0)
-            invoice.converted_total = total_val * float(invoice.fx_rate)
+            try:
+                rate, _ = fx_service.get_exchange_rate(currency, base_currency)
+            except Exception as e:
+                logger.warning(f"Failed to fetch live FX rate for {currency} to {base_currency} in Stage 2: {str(e)}. Using fallback rates.")
+                if base_currency == "INR":
+                    rates = {
+                        "INR": 1.0,
+                        "USD": 83.5,
+                        "EUR": 90.0,
+                        "GBP": 106.0,
+                        "JPY": 0.52,
+                        "CAD": 61.0,
+                    }
+                else:
+                    rates = {
+                        "USD": 1.0,
+                        "EUR": 1.08,
+                        "GBP": 1.27,
+                        "JPY": 0.0066,
+                        "CAD": 0.74,
+                    }
+                rate = rates.get(currency, 1.0)
+            
+            invoice.fx_rate = rate
+            invoice.converted_total = total_val * rate
             
             invoice.extracted_json = invoice_json
             invoice.confidence_score = invoice.ocr_confidence or 90.0
@@ -202,6 +221,28 @@ class ProcessingService:
             db.rollback()
             db.close()
             mark_as_failed(f"Regulatory compliance checks failed: {str(comp_err)}")
+            return
+
+        # ----------------------------------------------------
+        # Stage 3.7: FX Intelligence
+        # ----------------------------------------------------
+        try:
+            invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+            invoice.status = "FX_ANALYZING"
+            db.commit()
+            logger.info(f"Stage 3.7 [FX_ANALYZING] initiated for ID {invoice_id}")
+
+            fx_service.analyze_invoice_fx(invoice)
+            
+            invoice.status = "FX_ANALYZED"
+            db.commit()
+            logger.info(f"Stage 3.7 [FX_ANALYZED] committed for ID {invoice_id}")
+
+        except Exception as fx_err:
+            logger.error(f"FX stage failed for ID {invoice_id}: {str(fx_err)}")
+            db.rollback()
+            db.close()
+            mark_as_failed(f"FX Intelligence analysis failed: {str(fx_err)}")
             return
 
         # ----------------------------------------------------
